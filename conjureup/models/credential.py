@@ -36,8 +36,8 @@ class BaseCredential:
         raise NotImplementedError
 
     @classmethod
-    def check_cloud_type(cls, credential):
-        return credential == cls.CLOUD_TYPE
+    def check_cloud_type(cls, credential_cloud_type):
+        return credential_cloud_type == cls.CLOUD_TYPE
 
 
 class VSphereCredential(BaseCredential):

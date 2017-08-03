@@ -10,8 +10,7 @@ class CloudsController:
         self.view = None
 
     def finish(self, cloud):
-        """Save the selected cloud and move on to the region selection screen.
-
+        """Save the selected cloud and move on to credentials selection screen.
         """
         if cloud == 'maas':
             app.current_cloud_type = 'maas'

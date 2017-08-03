@@ -42,7 +42,6 @@ vsphere = SimpleNamespace(
 class AppConfig:
     """ Application config storage
     """
-
     # Juju bootstrap details
     bootstrap = bootstrap
 

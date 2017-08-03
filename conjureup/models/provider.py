@@ -13,13 +13,15 @@ from ubuntui.widgets.input import (
 from urwid import Text
 
 from conjureup.app_config import app
-from conjureup.juju import get_credential
+from conjureup.juju import add_cloud, get_cloud, get_credential
+from conjureup.model.credential import CredentialManager
 from conjureup.utils import (
     arun,
     get_physical_network_interfaces,
     is_valid_hostname
 )
-from conjureup.vsphere import VSphereClient
+
+from conjureup.vsphere import VSphereClient, VSphereInvalidLogin
 
 
 """ Defining the schema
@@ -87,7 +89,36 @@ class Field:
 class BaseProvider:
     """ Base provider for all schemas
     """
-    AUTH_TYPE = None
+
+    def __init__(self):
+        self.auth_type = None
+
+        # Current Juju model selected
+        self.model = None
+
+        # Juju model defaults
+        self.model_defaults = None
+
+        # Current Juju controller selected
+        self.controller = None
+
+        # Current Juju cloud selected
+        self.cloud = None
+
+        # Current Juju cloud type selected
+        self.cloud_type = None
+
+        # Current Juju cloud region
+        self.region = None
+
+        # Current credential
+        self.credential = None
+
+        # Attached api client
+        self.client = None
+
+        # Is this provider authenticated for api calls to itself?
+        self.authenticated = False
 
     def is_valid(self):
         validations = []
@@ -103,16 +134,14 @@ class BaseProvider:
         """
         raise NotImplementedError
 
-    def login(self, credential):
+    def login(self):
         """ Will login to the current provider to expose further information
-        that could be useful in subsequent views
-
-        Arguments:
-        credential: required credential to login to provider
+        that could be useful in subsequent views. This is optional and
+        not intended to fail if not defined in the inherited classes.
         """
-        raise NotImplementedError
+        pass
 
-    def cloud_config(self, **opts):
+    def cloud_config(self):
         """ Returns a config suitable to store as a cloud
 
         Arguments:
@@ -133,9 +162,10 @@ class BaseProvider:
 
 
 class AWS(BaseProvider):
-    AUTH_TYPE = 'access-key'
 
     def __init__(self):
+        super().__init__()
+        self.auth_type = 'access-key'
         self.access_key = Field(label='AWS Access Key',
                                 widget=StringEditor(),
                                 key='access-key')
@@ -174,6 +204,7 @@ class MAAS(BaseProvider):
     AUTH_TYPE = 'oauth1'
 
     def __init__(self):
+        super().__init__()
         self.endpoint = Field(
             label='api endpoint (http://example.com:5240/MAAS)',
             widget=StringEditor(),
@@ -441,9 +472,9 @@ class OpenStack(BaseProvider):
 
 
 class VSphere(BaseProvider):
-    AUTH_TYPE = 'userpass'
-
     def __init__(self):
+        super().__init__()
+        self.auth_type = 'userpass'
         self.endpoint = Field(
             label='api endpoint',
             widget=StringEditor(),
@@ -461,19 +492,25 @@ class VSphere(BaseProvider):
             key='password'
         )
 
-    def login(self, credential):
-        if app.vsphere.authenticated:
+    def login(self):
+        if self.authenticated:
             return
-
-        app.vsphere.client = VSphereClient(**credential)
+        self.client = VSphereClient(host=self.cloud['endpoint'],
+                                    **self.credential)
 
         try:
-            app.vsphere.client.login()
-            app.vsphere.authenticated = True
-        except:
-            raise Exception(
-                "Could not log in to VSphere, please "
-                "check your credentials and try again.")
+            self.client.login()
+            self.authenticated = True
+        except VSphereInvalidLogin:
+            raise
+
+    def get_datacenters(self):
+        """ Grab datacenters that will be used at this clouds regions
+        """
+        if not self.authenticated:
+            self.login()
+
+        return [dc.name for dc in self.client.get_datacenters()]
 
     def cloud_config(self):
         config = {
@@ -482,8 +519,8 @@ class VSphere(BaseProvider):
             'endpoint': self.endpoint.value,
             'regions': {}
         }
-        for dc in app.vsphere.client.get_datacenters():
-            config['regions'][dc.name] = {self.endpoint.value}
+        for dc in self.get_datacenters():
+            config['regions'][dc] = {self.endpoint.value}
         return config
 
     def fields(self):
